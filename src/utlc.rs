@@ -3,12 +3,12 @@ use std::collections::HashMap;
 #[derive(Clone)]
 pub enum Term {
     Var(String),
-    Fun(Envt, String, Box<Term>),
+    Fun(Environment, String, Box<Term>),
     App(Box<Term>, Box<Term>),
 }
 
 impl Term {
-    pub fn eval(envt: Envt, expr: Term) -> Term {
+    pub fn eval(envt: Environment, expr: Term) -> Term {
         match expr {
             Term::Var(name) =>
                 match envt.find(&name) {
@@ -31,11 +31,11 @@ impl Term {
 }
 
 #[derive(Clone)]
-pub struct Envt(HashMap<String, Term>);
+pub struct Environment(HashMap<String, Term>);
 
-impl Envt {
-    pub fn init() -> Envt {
-        Envt(HashMap::new())
+impl Environment {
+    pub fn init() -> Self {
+        Self(HashMap::new())
     }
     pub fn find(&self, name: &String) -> Option<Term> {
         match self.0.get(name) {
@@ -43,9 +43,9 @@ impl Envt {
             None => None
         }
     }
-    pub fn push(&self, name: String, term: Term) -> Envt {
+    pub fn push(&self, name: String, term: Term) -> Self {
         let mut next_envt = self.0.clone();
         next_envt.insert(name, term);
-        Envt(next_envt)
+        Self(next_envt)
     }
 }
