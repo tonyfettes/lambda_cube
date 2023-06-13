@@ -1,8 +1,8 @@
-use std::string::String;
 use std::boxed::Box;
+use std::string::String;
 
-mod utlc;
-mod stlc;
+mod simply_typed;
+mod untyped;
 
 fn main() {
     println!("Hello, world!");
