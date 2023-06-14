@@ -2,26 +2,30 @@ use std::collections::HashMap;
 
 #[derive(Clone)]
 pub enum Term {
+    Num(u64),
+    Str(String),
     Var(String),
     Fun(Environment, String, Box<Term>),
     App(Box<Term>, Box<Term>),
 }
 
 impl Term {
-    pub fn eval(envt: Environment, expr: Term) -> Term {
+    pub fn eval(env: Environment, expr: Term) -> Term {
         match expr {
+            Term::Num(num) => Term::Num(num),
+            Term::Str(str) => Term::Str(str),
             Term::Var(name) =>
-                match envt.find(&name) {
-                    Some(term) => Self::eval(envt, term),
+                match env.find(&name) {
+                    Some(term) => Self::eval(env, term),
                     None => Term::Var(name)
                 }
-            Term::Fun(_, patt, expr) => Term::Fun(envt, patt, expr),
+            Term::Fun(_, patt, expr) => Term::Fun(env, patt, expr),
             Term::App(lier, cant) => {
-                let lier_result = Self::eval(envt, *lier);
+                let lier_result = Self::eval(env, *lier);
                 match lier_result {
-                    Term::Fun(next_envt, patt, body) => {
-                        let envt = next_envt.push(patt, *body.clone());
-                        Self::eval(envt, *body)
+                    Term::Fun(new_env, patt, body) => {
+                        let env = new_env.push(patt, *body.clone());
+                        Self::eval(env, *body)
                     },
                     _ => Term::App(Box::new(lier_result), cant),
                 }
