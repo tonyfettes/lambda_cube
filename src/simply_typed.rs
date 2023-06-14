@@ -50,7 +50,7 @@ pub struct Func<Env> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Term<Env> {
-    Num(u64),
+    Int(i64),
     Str(String),
     Var(String),
     Fun(Func<Env>),
@@ -60,7 +60,7 @@ pub enum Term<Env> {
 impl<Env> fmt::Display for Term<Env> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Num(num) => {
+            Self::Int(num) => {
                 write!(f, "{}", num)
             },
             Self::Str(str) => {
@@ -82,7 +82,7 @@ impl<Env> fmt::Display for Term<Env> {
 impl Term<Environment> {
     pub fn eval(env: Environment, expr: Term<Environment>) -> Result<Term<Environment>> {
         match expr {
-            Self::Num(num) => Ok(Self::Num(num)),
+            Self::Int(num) => Ok(Self::Int(num)),
             Self::Str(str) => Ok(Self::Str(str)),
             Self::Var(name) => match env.find(&name) {
                 Some(term) => Self::eval(env, term),
@@ -133,7 +133,7 @@ impl Environment {
 
 #[derive(Debug, Clone)]
 pub enum Type {
-    Num,
+    Int,
     Str,
     Fun(Box<Type>, Box<Type>)
 }
@@ -141,7 +141,7 @@ pub enum Type {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Num => write!(f, "Num"),
+            Self::Int => write!(f, "Num"),
             Self::Str => write!(f, "Str"),
             Self::Fun(pat, exp) => write!(f, "{} => {}", pat, exp),
         }
@@ -151,7 +151,7 @@ impl fmt::Display for Type {
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Type::Num, Type::Num) => true,
+            (Type::Int, Type::Int) => true,
             (Type::Str, Type::Str) => true,
             (Type::Fun(self_para, self_body),
              Type::Fun(other_para, other_body)) =>
@@ -162,7 +162,7 @@ impl PartialEq for Type {
 }
 
 impl Type {
-    pub fn num() -> Self { Self::Num }
+    pub fn num() -> Self { Self::Int }
     pub fn str() -> Self { Self::Str }
     pub fn fun(pat: Type, exp: Type) -> Self { Self::Fun(Box::new(pat), Box::new(exp)) }
 }
@@ -185,7 +185,7 @@ impl Context {
 
 fn synthesize(ctx: &Context, term: &Term<Context>) -> Option<Type> {
     match term {
-        Term::Num(_) => Some(Type::Num),
+        Term::Int(_) => Some(Type::Int),
         Term::Str(_) => Some(Type::Str),
         Term::Var(var) => ctx.find(var),
         Term::Fun(fun) => {
@@ -225,41 +225,41 @@ mod tests {
         let id = Term::Fun(Func::<Environment> {
             env: Environment::init(),
             pat: "x".to_string(),
-            typ: Type::Num,
+            typ: Type::Int,
             exp: FuncImpl::Term(Box::new(Term::Var("x".to_string()))),
         });
-        let one = Term::Num(1);
+        let one = Term::Int(1);
         let app = Term::App(Box::new(id), Box::new(one));
         let result = Term::eval(Environment::init(), app);
-        assert_eq!(result, Ok(Term::Num(1)));
+        assert_eq!(result, Ok(Term::Int(1)));
     }
 
     #[test]
     fn test_term_arithm() {
-        let one = Term::<Environment>::Num(1);
-        let two = Term::<Environment>::Num(2);
+        let one = Term::<Environment>::Int(1);
+        let two = Term::<Environment>::Int(2);
         let add_impl = |term| match term {
-            Term::Num(a) => Ok(Term::Fun(Func {
+            Term::Int(a) => Ok(Term::Fun(Func {
                 env: Environment::init(),
                 pat: String::new(),
-                typ: Type::Num,
+                typ: Type::Int,
                 exp: FuncImpl::Host(Rc::new(move |term| match term {
-                    Term::Num(b) => Ok(Term::Num(a + b)),
-                    _ => Err(Error::MismatchedType(Type::Num)),
-                }), Type::fun(Type::Num, Type::Num)),
+                    Term::Int(b) => Ok(Term::Int(a + b)),
+                    _ => Err(Error::MismatchedType(Type::Int)),
+                }), Type::fun(Type::Int, Type::Int)),
             })),
-            _ => Err(Error::MismatchedType(Type::Num)),
+            _ => Err(Error::MismatchedType(Type::Int)),
         };
         let plus = Term::Fun(Func {
             env: Environment::init(),
             pat: String::new(),
-            typ: Type::Num,
-            exp: FuncImpl::Host(Rc::new(add_impl), Type::fun(Type::Num, Type::fun(Type::Num, Type::Num)))
+            typ: Type::Int,
+            exp: FuncImpl::Host(Rc::new(add_impl), Type::fun(Type::Int, Type::fun(Type::Int, Type::Int)))
         });
         let ap_left = Term::App(Box::new(plus), Box::new(one));
         let ap_right = Term::App(Box::new(ap_left), Box::new(two));
         let result = Term::eval(Environment::init(), ap_right);
-        assert_eq!(result, Ok(Term::Num(3)));
+        assert_eq!(result, Ok(Term::Int(3)));
     }
 
     #[test]
@@ -267,7 +267,7 @@ mod tests {
         let id = Term::Fun(Func::<()> {
             env: (),
             pat: "x".to_string(),
-            typ: Type::Num,
+            typ: Type::Int,
             exp: FuncImpl::Term(Box::new(Term::Var("x".to_string()))),
         });
         let term = Term::App(Box::new(id.clone()), Box::new(id));
