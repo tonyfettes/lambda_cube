@@ -1,5 +1,6 @@
-use crate::parse::parse_int::number;
-use crate::parse::parse_string::string_with_escape;
+use crate::parse::ast::{ApplyData, FuncData, RawAst, Term, TypedVar};
+use crate::parse::number::number;
+use crate::parse::string::string_with_escape;
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -11,38 +12,6 @@ use nom::{
     Err, IResult,
 };
 use std::boxed::Box;
-
-#[derive(PartialEq, Debug)]
-pub struct TypedVar {
-    var: String,
-    typ: Option<String>,
-}
-
-#[derive(PartialEq, Debug)]
-pub struct FuncData {
-    arg: TypedVar,
-    body: Box<Term>,
-}
-
-#[derive(PartialEq, Debug)]
-pub struct ApplyData {
-    func: Box<Term>,
-    arg: Box<Term>,
-}
-
-#[derive(PartialEq, Debug)]
-pub enum Term {
-    Int(i64),
-    Str(String),
-    Var(String), // The name of the variable
-    Func(FuncData),
-    Apply(ApplyData),
-}
-
-#[derive(PartialEq, Debug)]
-pub struct RawAst {
-    expr: Term,
-}
 
 // Parser for identifiers
 pub fn identifier(input: &str) -> IResult<&str, &str> {
