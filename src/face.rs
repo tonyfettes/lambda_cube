@@ -111,21 +111,22 @@ impl Type {
 }
 
 impl Type {
-    pub fn evaluate(env: Environment, typ: Type) -> Result<Type> {
+    pub fn evaluate(ctx: Context, env: Environment, typ: Type) -> Result<Type> {
         match typ {
             Self::Int => Ok(Self::Int),
             Self::Str => Ok(Self::Str),
             Self::Fun(arg, ret) => {
-                let ret_env = env.clone();
-                let arg_env = env;
                 Ok(Self::fun(
-                    Self::evaluate(arg_env, *arg)?,
-                    Self::evaluate(ret_env, *ret)?,
+                    Self::evaluate(ctx.clone(), env.clone(), *arg)?,
+                    Self::evaluate(ctx, env, *ret)?,
                 ))
             },
             Self::Var(var) => match env.find(var) {
                 Some(typ) => Ok(typ),
-                None => Err(Error::UndefinedVariable(var))
+                None => match var < ctx.typ  {
+                    true => Ok(Self::Var(var)),
+                    false => Err(Error::UndefinedVariable(var))
+                }
             },
             Self::ForAll(for_all) => Ok(Self::ForAll(for_all)),
             Self::Typ => Ok(Self::Typ)
@@ -251,6 +252,7 @@ impl Expr {
                 None => Err(Error::UndefinedVariable(var))
             },
             Self::Fun(fun) => {
+                let arg_typ = Type::evaluate(ctx.clone(), env.clone(), fun.typ.clone());
                 let new_ctx = ctx.exp(fun.typ.clone());
                 let (exp, typ) = Self::elaborate(new_ctx, env.clone(), *fun.exp)?;
                 Ok((core::Expr::Fun(core::Func {
@@ -283,10 +285,10 @@ impl Expr {
                 Ok((exp, Type::ForAll(ForAll { env, typ: Box::new(typ) })))
             },
             Self::TypApp(fun, arg) => {
-                match Self::elaborate(ctx, env.clone(), *fun)? {
+                match Self::elaborate(ctx.clone(), env.clone(), *fun)? {
                     (fun, Type::ForAll(for_all)) => {
-                        let new_env = for_all.env.push(arg);
-                        let typ = Type::evaluate(new_env, *for_all.typ)?;
+                        let new_env = for_all.env.push(Type::evaluate(ctx.clone(), env, arg)?);
+                        let typ = Type::evaluate(ctx, new_env, *for_all.typ)?;
                         Ok((fun, typ))
                     },
                     (_, typ) => Err(Error::MismatchedType(MismatchedType {
