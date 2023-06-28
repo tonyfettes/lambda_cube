@@ -1,10 +1,7 @@
 /// Core Calculus, only for dynamic evaluation
 
 use std::rc::Rc;
-use std::collections::HashMap;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Environment(HashMap<String, Expr>);
+use std::vec::Vec;
 
 // We don't include detailed information here, since well-typed program should not throw these
 // errors during runtime.
@@ -16,17 +13,20 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+// We can definitly do some optimization over the vector - for now it's copied every time it's changed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Environment(Vec<Expr>);
+
 impl Environment {
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self(Vec::new())
     }
-    pub fn find(&self, name: String) -> Option<Expr> {
-        Some(self.0.get(&name)?.clone())
+    pub fn find(&self, name: usize) -> Option<Expr> {
+        Some(self.0.get(self.0.len() - name - 1)?.clone())
     }
-    pub fn push(self, name: String, expr: Expr) -> Environment {
-        let mut new_env = self.0.clone();
-        new_env.insert(name, expr);
-        Self(new_env)
+    pub fn push(mut self, expr: Expr) -> Environment {
+        self.0.push(expr);
+        self
     }
 }
 
@@ -58,10 +58,10 @@ impl std::fmt::Debug for FuncImpl {
 }
 
 impl FuncImpl {
-    pub fn evaluate(env: Environment, pat: String, exp: FuncImpl, arg: Expr) -> Result<Expr> {
+    pub fn evaluate(env: Environment, exp: FuncImpl, arg: Expr) -> Result<Expr> {
         match exp {
             Self::Host(exp) => (*exp)(arg),
-            Self::Expr(exp) => Expr::evaluate(env.push(pat, arg), *exp)
+            Self::Expr(exp) => Expr::evaluate(env.push(arg), *exp)
         }
     }
 }
@@ -69,13 +69,12 @@ impl FuncImpl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Func {
     pub env: Environment,
-    pub pat: String,
     pub exp: FuncImpl,
 }
 
 impl Func {
     pub fn evaluate(fun: Func, arg: Expr) -> Result<Expr> {
-        FuncImpl::evaluate(fun.env, fun.pat, fun.exp, arg)
+        FuncImpl::evaluate(fun.env, fun.exp, arg)
     }
 }
 
@@ -84,7 +83,7 @@ impl Func {
 pub enum Expr {
     Int(i64),
     Str(String),
-    Var(String),
+    Var(usize),
     Fun(Func),
     App(Box<Expr>, Box<Expr>),
 }
@@ -92,11 +91,10 @@ pub enum Expr {
 impl Expr {
     pub fn int(int: i64) -> Self { Self::Int(int) }
     pub fn str(str: &str) -> Self { Self::Str(str.to_string()) }
-    pub fn var(var: &str) -> Self { Self::Var(var.to_string()) }
-    pub fn fun(pat: &str, exp: Self) -> Self {
+    pub fn var(var: usize) -> Self { Self::Var(var) }
+    pub fn fun(exp: Self) -> Self {
         Self::Fun(Func {
             env: Environment::new(),
-            pat: pat.to_string(),
             exp: FuncImpl::Expr(Box::new(exp)),
         })
     }
@@ -133,11 +131,29 @@ mod tests {
 
         #[test]
         fn identity() {
-            let id = Expr::fun("x", Expr::var("x"));
+            let id = Expr::fun(Expr::var(0));
             let one = Expr::int(1);
             let app = Expr::app(id, one);
             let result = Expr::evaluate(Environment::new(), app);
             assert_eq!(result, Ok(Expr::int(1)));
+        }
+
+        #[test]
+        fn natural() {
+            // x -> f -> x
+            let zero = Expr::fun(Expr::fun(Expr::var(1)));
+            // n -> x -> f -> f n
+            let succ = Expr::fun(Expr::fun(Expr::fun(Expr::app(Expr::var(0), Expr::var(2)))));
+            // x -> x
+            let id = Expr::fun(Expr::var(0));
+            // succ zero = x -> f -> f (x -> f -> x)
+            let one = Expr::app(succ, zero.clone());
+            // (succ zero) 1 = f -> f (x -> f -> x)
+            let n_one = Expr::app(one, Expr::int(1));
+            // ((succ zero) 1) id = id (x -> f -> x) = x -> f -> x = zero
+            let n_zero = Expr::app(n_one, id);
+
+            assert_eq!(Expr::evaluate(Environment::new(), n_zero), Ok(zero));
         }
     }
 
