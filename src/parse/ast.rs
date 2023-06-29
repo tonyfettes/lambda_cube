@@ -1,9 +1,30 @@
 use std::fmt;
 
 #[derive(PartialEq, Debug)]
+pub enum Type {
+    Int,
+    Str,
+    Var(String),
+    Fun(Box<Type>, Box<Type>),
+    ForAll(String, Box<Type>)
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int => write!(f, "Int"),
+            Self::Str => write!(f, "Str"),
+            Self::Var(var) => write!(f, "{}", var),
+            Self::Fun(arg, ret) => write!(f, "{} -> {}", arg, ret),
+            Self::ForAll(pat, exp) => write!(f, "∀ {} . {}", pat, exp)
+        }
+    }
+}
+
+#[derive(PartialEq, Debug)]
 pub struct TypedVar {
     pub var: String,
-    pub typ: Option<String>,
+    pub typ: Option<Type>,
 }
 
 impl fmt::Display for TypedVar {
@@ -41,12 +62,25 @@ impl fmt::Display for ApplyData {
 }
 
 #[derive(PartialEq, Debug)]
+pub struct TypeApplyData {
+    pub func: Box<Term>,
+    pub arg: Box<Type>,
+}
+
+impl fmt::Display for TypeApplyData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} @ {}", self.func, self.arg)
+    }
+}
+
+#[derive(PartialEq, Debug)]
 pub enum Term {
     Int(i64),
     Str(String),
     Var(String), // The name of the variable
     Func(FuncData),
     Apply(ApplyData),
+    TypeApply(TypeApplyData),
 }
 
 impl fmt::Display for Term {
@@ -57,6 +91,7 @@ impl fmt::Display for Term {
             Term::Var(var) => write!(f, "{}", var),
             Term::Func(func) => write!(f, "{}", func),
             Term::Apply(apply) => write!(f, "{}", apply),
+            Term::TypeApply(apply) => write!(f, "{}", apply),
         }
     }
 }

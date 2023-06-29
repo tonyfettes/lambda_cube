@@ -1,6 +1,7 @@
 /// Normalize the parsed AST, use De Brujin index so that we don't have to deal with
 /// alpha-equivalence afterwards.
 
+use crate::parse::ast;
 use crate::face;
 use std::collections::HashMap;
 
@@ -27,19 +28,22 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn normalize(env: Environment, typ: Type) -> Result<face::Type> {
+    pub fn from(typ: ast::Type) -> Self {
+        todo!()
+    }
+    pub fn normalize(env: Environment, typ: Self) -> Result<face::Type> {
         match typ {
-            Type::Int => Ok(face::Type::Int),
-            Type::Str => Ok(face::Type::Str),
-            Type::Fun(arg, ret) => Ok(face::Type::fun(
+            Self::Int => Ok(face::Type::Int),
+            Self::Str => Ok(face::Type::Str),
+            Self::Fun(arg, ret) => Ok(face::Type::fun(
                 Self::normalize(env.clone(), *arg)?,
                 Self::normalize(env, *ret)?
             )),
-            Type::Var(var) => match env.typ.get(&var) {
+            Self::Var(var) => match env.typ.get(&var) {
                 Some(idx) => Ok(face::Type::var(idx.clone())),
                 None => Err(Error::UndefinedVariable(var)),
             },
-            Type::ForAll(for_all) => {
+            Self::ForAll(for_all) => {
                 let new_env = env.typ(for_all.pat);
                 Ok(face::Type::ForAll(face::ForAll {
                     env: face::Environment::new(),
@@ -98,6 +102,26 @@ impl Environment {
 }
 
 impl Expr {
+    pub fn from(exp: ast::Term) -> Self {
+        match exp {
+            ast::Term::Int(int) => Self::Int(int),
+            ast::Term::Str(str) => Self::Str(str),
+            ast::Term::Var(var) => Self::Var(var),
+            ast::Term::Func(func) => match func.arg.typ {
+                Some(typ) => Self::Fun(Func {
+                    pat: func.arg.var,
+                    typ: Type::from(typ),
+                    exp: Box::new(Self::from(*func.body))
+                }),
+                None => Self::TypFun(TypeFunc {
+                    pat: func.arg.var,
+                    exp: Box::new(Self::from(*func.body))
+                })
+            },
+            ast::Term::Apply(apply) => Self::App(Box::new(Self::from(*apply.func)), Box::new(Self::from(*apply.arg))),
+            ast::Term::TypeApply(apply) => Self::TypApp(Box::new(Self::from(*apply.func)), Type::from(*apply.arg))
+        }
+    }
     pub fn normalize(env: Environment, exp: Expr) -> Result<face::Expr> {
         match exp {
             Self::Int(int) => Ok(face::Expr::Int(int)),

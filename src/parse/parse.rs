@@ -1,4 +1,4 @@
-use crate::parse::ast::{ApplyData, FuncData, RawAst, Term, TypedVar};
+use crate::parse::ast::{ApplyData, FuncData, RawAst, Term, TypedVar, Type};
 use crate::parse::number::number;
 use crate::parse::string::string_with_escape;
 use nom::{
@@ -22,10 +22,35 @@ pub fn identifier(input: &str) -> IResult<&str, &str> {
     ))(input)
 }
 
+fn parenthesized_type(input: &str) -> IResult<&str, Type> {
+    println!("par_typ {}", input);
+    delimited(tag("("), type_parser, tag(")"))(input)
+}
+
+fn type_no_arrow(input: &str) -> IResult<&str, Type> {
+    println!("typ_no_arr {}", input);
+    alt((
+        parenthesized_type,
+        map(tag("Int"), |_| { Type::Int }),
+        map(tag("Str"), |_| { Type::Str }),
+        map(map(identifier, str::to_string), Type::Var)
+    ))(input)
+}
+
+fn type_arrow(input: &str) -> IResult<&str, Type> {
+    println!("typ_arr {}", input);
+    let (input, arg) = type_no_arrow(input)?;
+    let (input, ret) = type_arrow(input)?;
+    Ok((input, Type::Fun(Box::new(arg), Box::new(ret))))
+}
+
 // Parser for types
-fn type_parser(input: &str) -> IResult<&str, &str> {
+fn type_parser(input: &str) -> IResult<&str, Type> {
     println!("typ {}", input);
-    identifier(input)
+    alt((
+        type_arrow,
+        type_no_arrow
+    ))(input)
 }
 
 // Parser for types
@@ -42,7 +67,7 @@ fn typed_variable(input: &str) -> IResult<&str, TypedVar> {
         input,
         TypedVar {
             var: var.to_string(),
-            typ: type_annotation.map(|x| x.to_string()),
+            typ: type_annotation,
         },
     ))
 }
@@ -108,7 +133,7 @@ fn expression(input: &str) -> IResult<&str, Term> {
 }
 
 // Helper function to parse an entire program
-fn parse_program(input: &str) -> IResult<&str, RawAst> {
+pub fn parse_program(input: &str) -> IResult<&str, RawAst> {
     println!("program {}", input);
     all_consuming(map(expression, |expr| RawAst { expr }))(input)
 }
