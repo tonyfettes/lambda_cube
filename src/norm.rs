@@ -29,7 +29,16 @@ pub enum Type {
 
 impl Type {
     pub fn from(typ: ast::Type) -> Self {
-        todo!()
+        match typ {
+            ast::Type::Int => Self::Int,
+            ast::Type::Str => Self::Str,
+            ast::Type::Var(var) => Self::Var(var),
+            ast::Type::Fun(arg, ret) => Self::Fun(Box::new(Self::from(*arg)), Box::new(Self::from(*ret))),
+            ast::Type::ForAll(pat, typ) => Self::ForAll(ForAll {
+                pat,
+                typ: Box::new(Self::from(*typ))
+            })
+        }
     }
     pub fn normalize(env: Environment, typ: Self) -> Result<face::Type> {
         match typ {
@@ -172,6 +181,19 @@ mod tests {
                 exp: Box::new(Expr::Var("x".to_string()))
             });
             let nid = face::Expr::fun(face::Type::Int, face::Expr::var(0));
+            assert_eq!(Expr::normalize(Environment::new(), oid), Ok(nid));
+        }
+
+        #[test]
+        fn identity_apply_one() {
+            let oid = Expr::Fun(Func {
+                pat: "x".to_string(),
+                typ: Type::Int,
+                exp: Box::new(Expr::Var("x".to_string()))
+            });
+            let oap = Expr::App(Box::new(oid.clone()), Box::new(Expr::Int(1)));
+            let nid = face::Expr::fun(face::Type::Int, face::Expr::var(0));
+            let nap = face::Expr::app(nid.clone(), face::Expr::Int(1));
             assert_eq!(Expr::normalize(Environment::new(), oid), Ok(nid));
         }
     }
