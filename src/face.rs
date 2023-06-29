@@ -146,6 +146,17 @@ pub enum Error {
     MismatchedType(MismatchedType)
 }
 
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UndefinedVariable(var) => write!(f, "Variable {} is not defined", var),
+            Self::MismatchedType(typ) =>
+                write!(f, "Type of argument {} is not consistent with the type of parameter {}",
+                       typ.actual, typ.expect),
+        }
+    }
+}
+
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
@@ -169,7 +180,7 @@ impl fmt::Display for FuncImpl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Host(_, _) => write!(f, "<built-in function>"),
-            Self::Expr(term) => write!(f, "{}", term),
+            Self::Expr(exp) => write!(f, "{}", exp),
         }
     }
 }
@@ -178,7 +189,7 @@ impl fmt::Debug for FuncImpl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Host(_, _) => write!(f, "<built-in function>"),
-            Self::Expr(term) => write!(f, "{}", term),
+            Self::Expr(exp) => write!(f, "{:?}", exp),
         }
     }
 }
@@ -202,7 +213,7 @@ pub enum Expr {
     Fun(Func),
     App(Box<Expr>, Box<Expr>),
     TypFun(TypeFunc),
-    TypApp(Box<Expr>, Type)
+    TypApp(Box<Expr>, Type),
 }
 
 impl fmt::Display for Expr {
@@ -274,7 +285,7 @@ impl Expr {
                             }))
                         }
                     _ => Err(Error::MismatchedType(MismatchedType {
-                        expect: Type::fun(arg_typ, Type::Var(0)),
+                        expect: arg_typ,
                         actual: fun_typ
                     }))
                 }
