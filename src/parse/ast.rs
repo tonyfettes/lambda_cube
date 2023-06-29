@@ -6,7 +6,8 @@ pub enum Type {
     Str,
     Var(String),
     Fun(Box<Type>, Box<Type>),
-    ForAll(String, Box<Type>)
+    ForAll(String, Box<Type>),
+    Typ,
 }
 
 impl fmt::Display for Type {
@@ -16,7 +17,8 @@ impl fmt::Display for Type {
             Self::Str => write!(f, "Str"),
             Self::Var(var) => write!(f, "{}", var),
             Self::Fun(arg, ret) => write!(f, "{} -> {}", arg, ret),
-            Self::ForAll(pat, exp) => write!(f, "∀ {} . {}", pat, exp)
+            Self::ForAll(pat, exp) => write!(f, "∀ {} . {}", pat, exp),
+            Self::Typ => write!(f, "∗")
         }
     }
 }
@@ -24,16 +26,13 @@ impl fmt::Display for Type {
 #[derive(PartialEq, Debug)]
 pub struct TypedVar {
     pub var: String,
-    pub typ: Option<Type>,
+    pub typ: Type,
 }
 
 impl fmt::Display for TypedVar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.var)?;
-        if let Some(typ) = &self.typ {
-            write!(f, ":{}", typ)?;
-        }
-        Ok(())
+        write!(f, ":{}", self.typ)
     }
 }
 
@@ -115,22 +114,22 @@ mod tests {
     fn test_typed_var_display() {
         let typed_var = TypedVar {
             var: "x".to_string(),
-            typ: Some(Type::Int),
+            typ: Type::Int,
         };
         assert_eq!(format!("{}", typed_var), "x:Int");
 
         let typed_var = TypedVar {
             var: "y".to_string(),
-            typ: None,
+            typ: Type::Typ,
         };
-        assert_eq!(format!("{}", typed_var), "y");
+        assert_eq!(format!("{}", typed_var), "y:∗");
     }
 
     #[test]
     fn test_func_data_display() {
         let typed_var = TypedVar {
             var: "x".to_string(),
-            typ: Some(Type::Int),
+            typ: Type::Int,
         };
         let term = Term::Int(42);
         let func_data = FuncData {
@@ -164,13 +163,13 @@ mod tests {
 
         let typed_var = TypedVar {
             var: "y".to_string(),
-            typ: None,
+            typ: Type::Int,
         };
         let term = Term::Func(FuncData {
             arg: typed_var,
             body: Box::new(Term::Int(42)),
         });
-        assert_eq!(format!("{}", term), "(y.42)");
+        assert_eq!(format!("{}", term), "(y:Int.42)");
 
         let term1 = Term::Var("f".to_string());
         let term2 = Term::Int(42);

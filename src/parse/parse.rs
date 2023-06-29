@@ -7,7 +7,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{alpha1, alphanumeric1},
-    combinator::{all_consuming, map, opt, recognize},
+    combinator::{all_consuming, map, recognize},
     error::{Error, ErrorKind, ParseError},
     multi::{many0, separated_list1},
     sequence::{delimited, pair, preceded, terminated},
@@ -27,17 +27,13 @@ pub fn identifier(input: &str) -> IResult<&str, String> {
     )(input)
 }
 
-fn parenthesized_type(input: &str) -> IResult<&str, Type> {
-    println!("par_typ {}", input);
-    delimited(tag("("), type_parser, tag(")"))(input)
-}
-
 fn type_no_arrow(input: &str) -> IResult<&str, Type> {
     println!("typ_no_arr {}", input);
     alt((
-        parenthesized_type,
+        parenthesized(type_parser),
         map(tag("Int"), |_| { Type::Int }),
         map(tag("Str"), |_| { Type::Str }),
+        map(tag("*"), |_| { Type::Typ }),
         map(identifier, Type::Var)
     ))(input)
 }
@@ -45,7 +41,8 @@ fn type_no_arrow(input: &str) -> IResult<&str, Type> {
 fn type_arrow(input: &str) -> IResult<&str, Type> {
     println!("typ_arr {}", input);
     let (input, arg) = type_no_arrow(input)?;
-    let (input, ret) = type_arrow(input)?;
+    let (input, _) = tag("->")(input)?;
+    let (input, ret) = type_parser(input)?;
     Ok((input, Type::Fun(Box::new(arg), Box::new(ret))))
 }
 
@@ -68,7 +65,7 @@ fn variable(input: &str) -> IResult<&str, String> {
 fn typed_variable(input: &str) -> IResult<&str, TypedVar> {
     println!("typ_var {}", input);
     let (input, var) = variable(input)?;
-    let (input, typ) = opt(preceded(tag(":"), type_parser))(input)?;
+    let (input, typ) = preceded(tag(":"), type_parser)(input)?;
 
     Ok((input, TypedVar { var, typ }))
 }
@@ -159,22 +156,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_untyped_func() {
-        let input = "x.x";
+    fn untyped_func() {
+        let input = "x:*.x";
         let (input, result) = function(input).unwrap();
         assert_eq!(input, "");
         assert_eq!(
             result.arg,
             TypedVar {
                 var: "x".to_string(),
-                typ: None
+                typ: Type::Typ
             }
         );
         assert_eq!(*result.body, Term::Var("x".to_string()))
     }
 
     #[test]
-    fn test_typed_func() {
+    fn typed_func() {
         let input = "x:Int.x";
         let (input, result) = function(input).unwrap();
         assert_eq!(input, "");
@@ -182,14 +179,14 @@ mod tests {
             result.arg,
             TypedVar {
                 var: "x".to_string(),
-                typ: Some(Type::Int)
+                typ: Type::Int
             }
         );
         assert_eq!(*result.body, Term::Var("x".to_string()))
     }
 
     #[test]
-    fn test_simple_apply() {
+    fn simple_apply() {
         let input = "x y";
         let (input, result) = application(input).unwrap();
         assert_eq!(input, "");
@@ -198,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_apply() {
+    fn nested_apply() {
         let input = "x y z";
         let (input, result) = application(input).unwrap();
         assert_eq!(input, "");
@@ -213,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn test_redundent_brackets() {
+    fn redundent_brackets() {
         let input_parenthesized = "(x y)";
         let input_not_parenthesized = "x y";
         let result_parenthesized = parse_program(input_parenthesized).unwrap();
@@ -222,8 +219,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parenthesized_function_apply() {
-        let input = "(x.x) y";
+    fn parenthesized_function_apply() {
+        let input = "(x:*.x) y";
         let (input, result) = parse_program(input).unwrap();
         assert_eq!(input, "");
         assert_eq!(
@@ -233,11 +230,30 @@ mod tests {
                     func: Box::new(Term::Func(FuncData {
                         arg: TypedVar {
                             var: "x".to_string(),
-                            typ: None
+                            typ: Type::Typ,
                         },
                         body: Box::new(Term::Var("x".to_string()))
                     })),
                     arg: Box::new(Term::Var("y".to_string()))
+                })
+            }
+        )
+    }
+
+    #[test]
+    fn arrow_type() {
+        let input = "(x:Int->Int.x)";
+        let (input, result) = parse_program(input).unwrap();
+        assert_eq!(input, "");
+        assert_eq!(
+            result,
+            RawAst {
+                expr: Term::Func(FuncData {
+                    arg: TypedVar {
+                        var: "x".to_string(),
+                        typ: Type::Fun(Box::new(Type::Int), Box::new(Type::Int))
+                    },
+                    body: Box::new(Term::Var("x".to_string()))
                 })
             }
         )
