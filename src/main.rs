@@ -18,8 +18,7 @@ fn main() -> io::Result<()> {
         stdin.read_line(&mut line)?;
         line = line.trim_end().to_owned();
         let (_, parsed) = parse::parse::parse_program(&line).unwrap();
-        let normed = norm::Expr::from(parsed.expr);
-        let normalized = norm::Expr::normalize(norm::Environment::new(), normed).unwrap();
+        let normalized = norm::Expr::normalize(norm::Environment::new(), parsed.expr).unwrap();
         let (elaborated, _) = face::Expr::elaborate(face::Context::new(), face::Environment::new(), normalized).unwrap();
         let evalauted = core::Expr::evaluate(core::Environment::new(), elaborated).unwrap();
         println!("{:?}", evalauted);

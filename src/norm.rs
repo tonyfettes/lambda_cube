@@ -28,37 +28,26 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn from(typ: ast::Type) -> Self {
+    pub fn normalize(env: Environment, typ: ast::Type) -> Result<face::Type> {
         match typ {
-            ast::Type::Int => Self::Int,
-            ast::Type::Str => Self::Str,
-            ast::Type::Var(var) => Self::Var(var),
-            ast::Type::Fun(arg, ret) => Self::Fun(Box::new(Self::from(*arg)), Box::new(Self::from(*ret))),
-            ast::Type::ForAll(pat, typ) => Self::ForAll(ForAll {
-                pat,
-                typ: Box::new(Self::from(*typ))
-            })
-        }
-    }
-    pub fn normalize(env: Environment, typ: Self) -> Result<face::Type> {
-        match typ {
-            Self::Int => Ok(face::Type::Int),
-            Self::Str => Ok(face::Type::Str),
-            Self::Fun(arg, ret) => Ok(face::Type::fun(
+            ast::Type::Int => Ok(face::Type::Int),
+            ast::Type::Str => Ok(face::Type::Str),
+            ast::Type::Fun(arg, ret) => Ok(face::Type::fun(
                 Self::normalize(env.clone(), *arg)?,
                 Self::normalize(env, *ret)?
             )),
-            Self::Var(var) => match env.typ.get(&var) {
+            ast::Type::Var(var) => match env.typ.get(&var) {
                 Some(idx) => Ok(face::Type::var(idx.clone())),
                 None => Err(Error::UndefinedVariable(var)),
             },
-            Self::ForAll(for_all) => {
-                let new_env = env.typ(for_all.pat);
+            ast::Type::ForAll(pat, typ) => {
+                let new_env = env.typ(pat);
                 Ok(face::Type::ForAll(face::ForAll {
                     env: face::Environment::new(),
-                    typ: Box::new(Self::normalize(new_env, *for_all.typ)?)
+                    typ: Box::new(Self::normalize(new_env, *typ)?)
                 }))
-            }
+            },
+            ast::Type::Typ => { Ok(face::Type::Typ) }
         }
     }
 }
@@ -111,55 +100,37 @@ impl Environment {
 }
 
 impl Expr {
-    pub fn from(exp: ast::Term) -> Self {
+    pub fn normalize(env: Environment, exp: ast::Term) -> Result<face::Expr> {
         match exp {
-            ast::Term::Int(int) => Self::Int(int),
-            ast::Term::Str(str) => Self::Str(str),
-            ast::Term::Var(var) => Self::Var(var),
-            ast::Term::Func(func) => match func.arg.typ {
-                Some(typ) => Self::Fun(Func {
-                    pat: func.arg.var,
-                    typ: Type::from(typ),
-                    exp: Box::new(Self::from(*func.body))
-                }),
-                None => Self::TypFun(TypeFunc {
-                    pat: func.arg.var,
-                    exp: Box::new(Self::from(*func.body))
-                })
-            },
-            ast::Term::Apply(apply) => Self::App(Box::new(Self::from(*apply.func)), Box::new(Self::from(*apply.arg))),
-            ast::Term::TypeApply(apply) => Self::TypApp(Box::new(Self::from(*apply.func)), Type::from(*apply.arg))
-        }
-    }
-    pub fn normalize(env: Environment, exp: Expr) -> Result<face::Expr> {
-        match exp {
-            Self::Int(int) => Ok(face::Expr::Int(int)),
-            Self::Str(str) => Ok(face::Expr::Str(str)),
-            Self::Var(var) => match env.exp.get(&var) {
+            ast::Term::Int(int) => Ok(face::Expr::Int(int)),
+            ast::Term::Str(str) => Ok(face::Expr::Str(str)),
+            ast::Term::Var(var) => match env.exp.get(&var) {
                 Some(idx) => Ok(face::Expr::Var(env.exp.len() - idx - 1)),
                 None => Err(Error::UndefinedVariable(var))
             },
-            Self::Fun(fun) => {
-                let new_env = env.exp(fun.pat);
-                Ok(face::Expr::Fun(face::Func {
-                    typ: Type::normalize(new_env.clone(), fun.typ)?,
-                    exp: Box::new(Self::normalize(new_env, *fun.exp)?)
-                }))
+            ast::Term::Func(func) => match func.arg.typ {
+                ast::Type::Typ => {
+                    let new_env = env.typ(func.arg.var);
+                    Ok(face::Expr::TypFun(face::TypeFunc {
+                        exp: Box::new(Self::normalize(new_env, *func.body)?)
+                    }))
+                },
+                _ => {
+                    let new_env = env.exp(func.arg.var);
+                    Ok(face::Expr::Fun(face::Func {
+                        typ: Type::normalize(new_env.clone(), func.arg.typ)?,
+                        exp: Box::new(Self::normalize(new_env, *func.body)?)
+                    }))
+                }
             },
-            Self::App(fun, arg) => Ok(face::Expr::app(
-                Self::normalize(env.clone(), *fun)?,
+            ast::Term::Apply(ast::ApplyData { func, arg }) => Ok(face::Expr::app(
+                Self::normalize(env.clone(), *func)?,
                 Self::normalize(env, *arg)?
             )),
-            Self::TypFun(fun) => {
-                let new_env = env.typ(fun.pat);
-                Ok(face::Expr::TypFun(face::TypeFunc {
-                    exp: Box::new(Self::normalize(new_env, *fun.exp)?)
-                }))
-            },
-            Self::TypApp(fun, arg) => {
+            ast::Term::TypeApply(ast::TypeApplyData { func, arg }) => {
                 Ok(face::Expr::typ_app(
-                    Self::normalize(env.clone(), *fun)?,
-                    Type::normalize(env, arg)?
+                    Self::normalize(env.clone(), *func)?,
+                    Type::normalize(env, *arg)?
                 ))
             }
         }
@@ -175,10 +146,12 @@ mod tests {
 
         #[test]
         fn identity() {
-            let oid = Expr::Fun(Func {
-                pat: "x".to_string(),
-                typ: Type::Int,
-                exp: Box::new(Expr::Var("x".to_string()))
+            let oid = ast::Term::Func(ast::FuncData {
+                arg: ast::TypedVar {
+                    var: "x".to_string(),
+                    typ: ast::Type::Int,
+                },
+                body: Box::new(ast::Term::Var("x".to_string()))
             });
             let nid = face::Expr::fun(face::Type::Int, face::Expr::var(0));
             assert_eq!(Expr::normalize(Environment::new(), oid), Ok(nid));
@@ -186,15 +159,20 @@ mod tests {
 
         #[test]
         fn identity_apply_one() {
-            let oid = Expr::Fun(Func {
-                pat: "x".to_string(),
-                typ: Type::Int,
-                exp: Box::new(Expr::Var("x".to_string()))
+            let oid = ast::Term::Func(ast::FuncData {
+                arg: ast::TypedVar {
+                    var: "x".to_string(),
+                    typ: ast::Type::Int,
+                },
+                body: Box::new(ast::Term::Var("x".to_string()))
             });
-            let oap = Expr::App(Box::new(oid.clone()), Box::new(Expr::Int(1)));
+            let oap = ast::Term::Apply(ast::ApplyData {
+                func: Box::new(oid),
+                arg: Box::new(ast::Term::Int(1))
+            });
             let nid = face::Expr::fun(face::Type::Int, face::Expr::var(0));
             let nap = face::Expr::app(nid.clone(), face::Expr::Int(1));
-            assert_eq!(Expr::normalize(Environment::new(), oid), Ok(nid));
+            assert_eq!(Expr::normalize(Environment::new(), oap), Ok(nap));
         }
     }
 }
