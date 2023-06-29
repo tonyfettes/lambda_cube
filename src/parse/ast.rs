@@ -115,7 +115,7 @@ mod tests {
     fn test_typed_var_display() {
         let typed_var = TypedVar {
             var: "x".to_string(),
-            typ: Some("Int".to_string()),
+            typ: Some(Type::Int),
         };
         assert_eq!(format!("{}", typed_var), "x:Int");
 
@@ -130,7 +130,7 @@ mod tests {
     fn test_func_data_display() {
         let typed_var = TypedVar {
             var: "x".to_string(),
-            typ: Some("Int".to_string()),
+            typ: Some(Type::Int),
         };
         let term = Term::Int(42);
         let func_data = FuncData {

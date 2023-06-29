@@ -182,7 +182,7 @@ mod tests {
             result.arg,
             TypedVar {
                 var: "x".to_string(),
-                typ: Some("Int".to_string())
+                typ: Some(Type::Int)
             }
         );
         assert_eq!(*result.body, Term::Var("x".to_string()))
