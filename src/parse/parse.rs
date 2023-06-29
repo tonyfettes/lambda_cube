@@ -1,6 +1,8 @@
 use crate::parse::ast::{ApplyData, FuncData, RawAst, Term, TypedVar, Type};
 use crate::parse::number::number;
 use crate::parse::string::string_with_escape;
+use nom::character::complete::multispace0;
+use nom::Compare;
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -9,17 +11,20 @@ use nom::{
     error::{Error, ErrorKind, ParseError},
     multi::{many0, separated_list1},
     sequence::{delimited, pair, preceded, terminated},
-    Err, IResult,
+    AsChar, Err, IResult, InputTake, InputTakeAtPosition, Parser,
 };
 use std::boxed::Box;
 
 // Parser for identifiers
-pub fn identifier(input: &str) -> IResult<&str, &str> {
+pub fn identifier(input: &str) -> IResult<&str, String> {
     println!("id {}", input);
-    recognize(pair(
-        alt((alpha1, tag("_"))),
-        many0(alt((alphanumeric1, tag("_")))),
-    ))(input)
+    map(
+        recognize(pair(
+            alt((alpha1, tag("_"))),
+            many0(alt((alphanumeric1, tag("_")))),
+        )),
+        str::to_string,
+    )(input)
 }
 
 fn parenthesized_type(input: &str) -> IResult<&str, Type> {
@@ -33,7 +38,7 @@ fn type_no_arrow(input: &str) -> IResult<&str, Type> {
         parenthesized_type,
         map(tag("Int"), |_| { Type::Int }),
         map(tag("Str"), |_| { Type::Str }),
-        map(map(identifier, str::to_string), Type::Var)
+        map(identifier, Type::Var)
     ))(input)
 }
 
@@ -53,23 +58,19 @@ fn type_parser(input: &str) -> IResult<&str, Type> {
     ))(input)
 }
 
-// Parser for types
+// Parser for raw variables
 fn variable(input: &str) -> IResult<&str, String> {
     println!("var {}", input);
-    map(identifier, str::to_string)(input)
+    identifier(input)
 }
+
 // Parser for variables with optional type annotation
 fn typed_variable(input: &str) -> IResult<&str, TypedVar> {
     println!("typ_var {}", input);
     let (input, var) = variable(input)?;
-    let (input, type_annotation) = opt(preceded(tag(":"), type_parser))(input)?;
-    Ok((
-        input,
-        TypedVar {
-            var: var.to_string(),
-            typ: type_annotation,
-        },
-    ))
+    let (input, typ) = opt(preceded(tag(":"), type_parser))(input)?;
+
+    Ok((input, TypedVar { var, typ }))
 }
 
 // Parser for function definitions
@@ -91,12 +92,15 @@ fn application(input: &str) -> IResult<&str, ApplyData> {
     println!("app {}", input);
     let (input, mut terms) = separated_list1(tag(" "), map(expression_no_apply, Box::new))(input)?;
     if terms.len() <= 1 {
+        // At least 2 terms are expected
         Err(Err::Error(Error::from_error_kind(
             input,
             ErrorKind::SeparatedList,
         )))
     } else {
+        // build up AST. Apply is left associate
         let remainder = terms.split_off(2);
+        // It's safe to `unwrap` here because at least 2 elements are there
         let first = ApplyData {
             arg: terms.pop().unwrap(),
             func: terms.pop().unwrap(),
@@ -110,15 +114,27 @@ fn application(input: &str) -> IResult<&str, ApplyData> {
     }
 }
 
-fn parenthesized_expression(input: &str) -> IResult<&str, Term> {
-    println!("par_exp {}", input);
-    delimited(tag("("), expression, tag(")"))(input)
+fn parenthesized<'a, I: Clone, O, E: ParseError<I>, F>(f: F) -> impl FnMut(I) -> IResult<I, O, E>
+where
+    F: Parser<I, O, E>,
+    I: InputTake + Compare<&'static str>,
+{
+    delimited(tag("("), f, tag(")"))
+}
+
+fn token<I: Clone, O, E: ParseError<I>, F>(f: F) -> impl FnMut(I) -> IResult<I, O, E>
+where
+    F: Parser<I, O, E>,
+    I: InputTakeAtPosition,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
+    delimited(multispace0, f, multispace0)
 }
 
 fn expression_no_apply(input: &str) -> IResult<&str, Term> {
     println!("exp_no_app {}", input);
     alt((
-        parenthesized_expression,
+        parenthesized(expression),
         map(function, Term::Func),
         map(string_with_escape, Term::Str),
         map(number, Term::Int),
