@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Type {
     Int,
     Str,
@@ -18,7 +18,7 @@ impl fmt::Display for Type {
             Self::Var(var) => write!(f, "{}", var),
             Self::Fun(arg, ret) => write!(f, "{} -> {}", arg, ret),
             Self::ForAll(pat, exp) => write!(f, "∀ {} . {}", pat, exp),
-            Self::Typ => write!(f, "∗")
+            Self::Typ => write!(f, "∗"),
         }
     }
 }
