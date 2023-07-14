@@ -1,4 +1,4 @@
-use crate::parse::ast::{ApplyData, FuncData, RawAst, Term, TypedVar, Type};
+use crate::parse::ast::{ApplyData, FuncData, RawAst, Term, Type, TypedVar};
 use crate::parse::number::number;
 use crate::parse::string::string_with_escape;
 use nom::character::complete::multispace0;
@@ -6,8 +6,8 @@ use nom::Compare;
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{alpha1, alphanumeric1},
-    combinator::{all_consuming, map, recognize},
+    character::complete::{alpha1, alphanumeric1, multispace1},
+    combinator::{all_consuming, map, recognize, value},
     error::{Error, ErrorKind, ParseError},
     multi::{many0, separated_list1},
     sequence::{delimited, pair, preceded, terminated},
@@ -17,7 +17,7 @@ use std::boxed::Box;
 
 // Parser for identifiers
 pub fn identifier(input: &str) -> IResult<&str, String> {
-    println!("id {}", input);
+    println!("id `{}`", input);
     map(
         recognize(pair(
             alt((alpha1, tag("_"))),
@@ -28,52 +28,49 @@ pub fn identifier(input: &str) -> IResult<&str, String> {
 }
 
 fn type_no_arrow(input: &str) -> IResult<&str, Type> {
-    println!("typ_no_arr {}", input);
+    println!("typ_no_arr `{}`", input);
     alt((
         parenthesized(type_parser),
-        map(tag("Int"), |_| { Type::Int }),
-        map(tag("Str"), |_| { Type::Str }),
-        map(tag("*"), |_| { Type::Typ }),
-        map(identifier, Type::Var)
+        value(Type::Int, tag("Int")),
+        value(Type::Str, tag("Str")),
+        value(Type::Typ, tag("*")),
+        map(identifier, Type::Var),
     ))(input)
 }
 
 fn type_arrow(input: &str) -> IResult<&str, Type> {
-    println!("typ_arr {}", input);
+    println!("typ_arr `{}`", input);
     let (input, arg) = type_no_arrow(input)?;
-    let (input, _) = tag("->")(input)?;
+    let (input, _) = token(tag("->"))(input)?;
     let (input, ret) = type_parser(input)?;
     Ok((input, Type::Fun(Box::new(arg), Box::new(ret))))
 }
 
 // Parser for types
 fn type_parser(input: &str) -> IResult<&str, Type> {
-    println!("typ {}", input);
-    alt((
-        type_arrow,
-        type_no_arrow
-    ))(input)
+    println!("typ `{}`", input);
+    alt((type_arrow, type_no_arrow))(input)
 }
 
 // Parser for raw variables
 fn variable(input: &str) -> IResult<&str, String> {
-    println!("var {}", input);
+    println!("var `{}`", input);
     identifier(input)
 }
 
 // Parser for variables with optional type annotation
 fn typed_variable(input: &str) -> IResult<&str, TypedVar> {
-    println!("typ_var {}", input);
+    println!("typ_var `{}`", input);
     let (input, var) = variable(input)?;
-    let (input, typ) = preceded(tag(":"), type_parser)(input)?;
+    let (input, typ) = preceded(token(tag(":")), type_parser)(input)?;
 
     Ok((input, TypedVar { var, typ }))
 }
 
 // Parser for function definitions
 fn function(input: &str) -> IResult<&str, FuncData> {
-    println!("fun {}", input);
-    let (input, arg) = terminated(typed_variable, tag("."))(input)?;
+    println!("fun `{}`", input);
+    let (input, arg) = terminated(typed_variable, token(tag(".")))(input)?;
     let (input, body) = expression(input)?;
     Ok((
         input,
@@ -86,9 +83,12 @@ fn function(input: &str) -> IResult<&str, FuncData> {
 
 // Parser for function applications
 fn application(input: &str) -> IResult<&str, ApplyData> {
-    println!("app {}", input);
-    let (input, mut terms) = separated_list1(tag(" "), map(expression_no_apply, Box::new))(input)?;
+    println!("app `{}`", input);
+    let (input, mut terms) =
+        separated_list1(multispace1, map(expression_no_apply, Box::new))(input)?;
+    println!("{}", terms.len());
     if terms.len() <= 1 {
+        println!("Raise an error");
         // At least 2 terms are expected
         Err(Err::Error(Error::from_error_kind(
             input,
@@ -114,9 +114,10 @@ fn application(input: &str) -> IResult<&str, ApplyData> {
 fn parenthesized<'a, I: Clone, O, E: ParseError<I>, F>(f: F) -> impl FnMut(I) -> IResult<I, O, E>
 where
     F: Parser<I, O, E>,
-    I: InputTake + Compare<&'static str>,
+    I: InputTake + InputTakeAtPosition + Compare<&'static str>,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
 {
-    delimited(tag("("), f, tag(")"))
+    delimited(tag("("), token(f), tag(")"))
 }
 
 fn token<I: Clone, O, E: ParseError<I>, F>(f: F) -> impl FnMut(I) -> IResult<I, O, E>
@@ -129,7 +130,7 @@ where
 }
 
 fn expression_no_apply(input: &str) -> IResult<&str, Term> {
-    println!("exp_no_app {}", input);
+    println!("exp_no_app `{}`", input);
     alt((
         parenthesized(expression),
         map(function, Term::Func),
@@ -141,14 +142,14 @@ fn expression_no_apply(input: &str) -> IResult<&str, Term> {
 
 // Parser for expressions
 fn expression(input: &str) -> IResult<&str, Term> {
-    println!("exp {}", input);
+    println!("exp `{}`", input);
     alt((map(application, Term::Apply), expression_no_apply))(input)
 }
 
 // Helper function to parse an entire program
 pub fn parse_program(input: &str) -> IResult<&str, RawAst> {
-    println!("program {}", input);
-    all_consuming(map(expression, |expr| RawAst { expr }))(input)
+    println!("program `{}`", input);
+    all_consuming(token(map(expression, |expr| RawAst { expr })))(input)
 }
 
 #[cfg(test)]
@@ -257,5 +258,15 @@ mod tests {
                 })
             }
         )
+    }
+
+    #[test]
+    fn space_saparated_program() {
+        let input_with_space = " ( x: Int. y: Int \t-> Str. y x) 12 \t\n(x: Int. \"123\") ";
+        let input_without_space = "(x:Int.y:Int->Str.y x) 12 (x:Int.\"123\")";
+        assert_eq!(
+            parse_program(input_with_space),
+            parse_program(input_without_space)
+        );
     }
 }
