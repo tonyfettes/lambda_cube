@@ -1,6 +1,6 @@
 use std::fmt;
 use std::rc::Rc;
-use super::core;
+use crate::core;
 
 // Typing context, i.e. A -> B means variable A has type B
 #[derive(Debug, Clone, PartialEq)]
@@ -16,13 +16,17 @@ impl Context {
             exp: Vec::new(),
         }
     }
-    pub fn typ(mut self) -> Self {
-        self.typ += 1;
-        self
-    }
-    pub fn exp(mut self, typ: Type) -> Self {
-        self.exp.push(typ);
-        self
+    pub fn push(mut self, typ: Type) -> Self {
+        match typ {
+            Type::Typ => {
+                self.typ += 1;
+                self
+            }
+            _ => {
+                self.exp.push(typ);
+                self
+            }
+        }
     }
 }
 
@@ -79,6 +83,8 @@ pub enum Type {
     Int,
     Str,
     Fun(Box<Type>, Box<Type>),
+    Sum(Box<Type>, Box<Type>),
+    Pro(Box<Type>, Box<Type>),
     Var(usize),
     ForAll(ForAll),
     Typ,
@@ -87,10 +93,12 @@ pub enum Type {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Int => write!(f, "Num"),
+            Self::Int => write!(f, "Int"),
             Self::Str => write!(f, "Str"),
-            Self::Var(var) => write!(f, "{}\u{20d6}", var),
             Self::Fun(pat, exp) => write!(f, "({} →  {})", pat, exp),
+            Self::Sum(fst, snd) => write!(f, "({} + {})", fst, snd),
+            Self::Pro(fst, snd) => write!(f, "({} × {})", fst, snd),
+            Self::Var(var) => write!(f, "{}\u{20d6}", var),
             Self::ForAll(for_all) => write!(f, "(∀ _ →  {})", for_all.typ),
             Self::Typ => write!(f, "∗"),
         }
@@ -102,6 +110,16 @@ impl Type {
     pub fn str() -> Self { Self::Str }
     pub fn var(var: usize) -> Self { Self::Var(var) }
     pub fn fun(pat: Type, exp: Type) -> Self { Self::Fun(Box::new(pat), Box::new(exp)) }
+    pub fn sum(fst: Type, snd: Type) -> Self {
+        // let fst_fun_typ = Self::fun(fst, Self::var(0));
+        // let snd_fun_typ = Self::fun(snd, Self::var(0));
+        // Self::for_all(Self::fun(fst_fun_typ, Self::fun(snd_fun_typ, Self::var(0))))
+        Self::Sum(Box::new(fst), Box::new(snd))
+    }
+    pub fn pro(fst: Type, snd: Type) -> Self {
+        // Self::for_all(Self::fun(Self::fun(fst, Self::fun(snd, Self::var(0))), Self::var(0)))
+        Self::Pro(Box::new(fst), Box::new(snd))
+    }
     pub fn for_all(exp: Type) -> Self {
         Self::ForAll(ForAll {
             env: Environment::new(),
@@ -119,6 +137,18 @@ impl Type {
                 Ok(Self::fun(
                     Self::evaluate(ctx.clone(), env.clone(), *arg)?,
                     Self::evaluate(ctx, env, *ret)?,
+                ))
+            },
+            Self::Sum(fst, snd) => {
+                Ok(Self::fun(
+                    Self::evaluate(ctx.clone(), env.clone(), *fst)?,
+                    Self::evaluate(ctx, env, *snd)?
+                ))
+            },
+            Self::Pro(fst, snd) => {
+                Ok(Self::fun(
+                    Self::evaluate(ctx.clone(), env.clone(), *fst)?,
+                    Self::evaluate(ctx, env, *snd)?
                 ))
             },
             Self::Var(var) => match env.find(var) {
@@ -206,12 +236,29 @@ pub struct TypeFunc {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Inj {
+    L,
+    R
+}
+
+impl fmt::Display for Inj {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::L => write!(f, "L"),
+            Self::R => write!(f, "R"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int(i64),
     Str(String),
     Var(usize),
     Fun(Func),
     App(Box<Expr>, Box<Expr>),
+    Inj(Inj, Type, Box<Expr>),
+    Con(Box<Expr>, Box<Expr>),
     TypFun(TypeFunc),
     TypApp(Box<Expr>, Type),
 }
@@ -224,6 +271,8 @@ impl fmt::Display for Expr {
             Self::Var(var) => write!(f, "{}\u{20d6}", var),
             Self::Fun(fun) => write!(f, "(λ _ : {} →  {})", fun.typ, fun.exp),
             Self::App(fun, arg) => write!(f, "({} {})", fun, arg),
+            Self::Inj(inj, typ, exp) => write!(f, "({} {})", inj, exp),
+            Self::Con(lexp, rexp) => write!(f, "({} , {})", lexp, rexp),
             Self::TypFun(fun) => write!(f, "(Λ _ →  {})", fun.exp),
             Self::TypApp(fun, arg) => write!(f, "({} @ {})", fun, arg),
         }
@@ -243,6 +292,9 @@ impl Expr {
     pub fn app(fun: Expr, arg: Expr) -> Self {
         Self::App(Box::new(fun), Box::new(arg))
     }
+    pub fn con(fst: Expr, snd: Expr) -> Self {
+        Self::Con(Box::new(fst), Box::new(snd))
+    }
     pub fn typ_fun(exp: Self) -> Self {
         Self::TypFun(TypeFunc {
             exp: Box::new(exp)
@@ -254,8 +306,52 @@ impl Expr {
 }
 
 impl Expr {
-    pub fn elaborate(ctx: Context, env: Environment, exp: Expr) -> Result<(super::core::Expr, Type)> {
-        match exp.clone() {
+    pub fn shift(exp: Expr) -> Expr {
+        match exp {
+            Self::Int(int) => Self::Int(int),
+        }
+    }
+    pub fn shift(env: Option<usize>, exp: Expr, idx: usize) -> Expr {
+        let inc_env = |env| {
+            match env {
+                None => Some(0),
+                Some(env) => Some(env + 1)
+            }
+        };
+        match exp {
+            Self::Int(int) => Self::Int(int),
+            Self::Str(str) => Self::Str(str),
+            Self::Var(var) =>
+                match env {
+                    Some(env) =>
+                        if var <= env {
+                            Self::Var(var)
+                        } else {
+                            Self::Var(var + idx)
+                        }
+                    None => Self::Var(var + idx)
+                }
+            Self::Fun(fun) => Self::Fun(Func {
+                exp: Box::new(Self::shift(inc_env(env), *fun.exp, idx)),
+                ..fun
+            }),
+            Self::App(fun, arg) => Self::app(Self::shift(env, *fun, idx), Self::shift(env, *arg, idx)),
+            Self::Inj(inj, typ, exp) => Self::Inj(inj, typ, Box::new(Self::shift(env, *exp, idx + 2))),
+            Self::Con(fst, snd) => Self::Con(
+                Box::new(Self::shift(env, *fst, idx + 1)),
+                Box::new(Self::shift(env, *snd, idx + 1))
+            ),
+            Self::TypFun(typ_fun) => Self::TypFun(TypeFunc {
+                exp: Box::new(Self::shift(env, *typ_fun.exp, idx))
+            }),
+            Self::TypApp(fun, arg) => Self::TypApp(
+                Box::new(Self::shift(env, *fun, idx)),
+                arg
+            ),
+        }
+    }
+    pub fn elaborate(ctx: Context, env: Environment, exp: Expr) -> Result<(core::Expr, Type)> {
+        match exp {
             Self::Int(int) => Ok((core::Expr::Int(int), Type::Int)),
             Self::Str(str) => Ok((core::Expr::Str(str), Type::Str)),
             Self::Var(var) => match ctx.exp.iter().nth_back(var) {
@@ -264,12 +360,9 @@ impl Expr {
             },
             Self::Fun(fun) => {
                 let arg_typ = Type::evaluate(ctx.clone(), env.clone(), fun.typ.clone());
-                let new_ctx = ctx.exp(fun.typ.clone());
+                let new_ctx = ctx.push(fun.typ.clone());
                 let (exp, typ) = Self::elaborate(new_ctx, env.clone(), *fun.exp)?;
-                Ok((core::Expr::Fun(core::Func {
-                    env: core::Environment::new(),
-                    exp: core::FuncImpl::Expr(Box::new(exp))
-                }), Type::fun(fun.typ, typ)))
+                Ok((core::Expr::fun(exp), Type::fun(fun.typ, typ)))
             },
             Self::App(fun, arg) => {
                 let (fun_exp, fun_typ) = Self::elaborate(ctx.clone(), env.clone(), *fun)?;
@@ -290,8 +383,35 @@ impl Expr {
                     }))
                 }
             },
+            Self::Inj(inj, typ, exp) => {
+                let res_typ = Type::evaluate(ctx.clone(), env.clone(), typ)?;
+                let (inj_exp, inj_typ) = Self::elaborate(ctx, env, *exp)?;
+                let typ = match inj {
+                    Inj::L => Type::sum(inj_typ, res_typ),
+                    Inj::R => Type::sum(res_typ, inj_typ)
+                };
+                let inj_idx = match inj {
+                    Inj::L => 1,
+                    Inj::R => 0
+                };
+                use crate::core::Expr;
+                let fun = Expr::fun;
+                let app = Expr::app;
+                let var = Expr::var;
+                Ok((fun(fun(app(var(inj_idx), inj_exp))), typ))
+            },
+            Self::Con(fst, snd) => {
+                let (fst_exp, fst_typ) = Self::elaborate(ctx.clone(), env.clone(), *fst)?;
+                let (snd_exp, snd_typ) = Self::elaborate(ctx, env, *snd)?;
+                let typ = Type::pro(fst_typ, snd_typ);
+                use crate::core::Expr;
+                let fun = Expr::fun;
+                let app = Expr::app;
+                let var = Expr::var;
+                Ok((fun(app(app(var(0), fst_exp), snd_exp)), typ))
+            },
             Self::TypFun(fun) => {
-                let new_ctx = ctx.typ();
+                let new_ctx = ctx.push(Type::Typ);
                 let (exp, typ) = Self::elaborate(new_ctx, env.clone(), *fun.exp)?;
                 Ok((exp, Type::ForAll(ForAll { env, typ: Box::new(typ) })))
             },
@@ -315,7 +435,6 @@ impl Expr {
     }
 }
 
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -411,6 +530,27 @@ mod tests {
                 id_typ_a
             );
         }
+
+        #[test]
+        fn product_projection() {
+            let fst_val = Expr::int(0);
+            let snd_val = Expr::int(1);
+            let con_val = Expr::con(fst_val, snd_val);
+            let fst_prj = Expr::fun(Type::Int, Expr::fun(Type::Int, Expr::var(1)));
+            let snd_prj = Expr::fun(Type::Int, Expr::fun(Type::Int, Expr::var(0)));
+            let (exp, typ) =
+                Expr::elaborate(Context::new(), Environment::new(), Expr::app(con_val.clone(), fst_prj)).unwrap();
+            assert!(typ == Type::Int);
+            let result =
+                core::Expr::evaluate(core::Environment::new(), exp).unwrap();
+            assert!(result == core::Expr::var(0));
+            let (exp, typ) =
+                Expr::elaborate(Context::new(), Environment::new(), Expr::app(con_val, snd_prj)).unwrap();
+            assert!(typ == Type::Int);
+            let result =
+                core::Expr::evaluate(core::Environment::new(), exp).unwrap();
+            assert!(result == core::Expr::var(1));
+        }
     }
 
     mod display {
@@ -419,7 +559,7 @@ mod tests {
         #[test]
         fn fun() {
             let fun = Expr::fun(Type::Int, Expr::var(0));
-            assert_eq!(format!("{}", fun), "(λ _ : Num →  0⃖)");
+            assert_eq!(format!("{}", fun), "(λ _ : Int →  0⃖)");
         }
 
         #[test]

@@ -4,6 +4,7 @@ mod parse;
 mod norm;
 mod face;
 mod core;
+mod cbpv;
 
 use std::io;
 use std::io::Write;
