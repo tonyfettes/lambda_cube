@@ -27,7 +27,8 @@ impl Environment {
         self.0.push(expr);
         self
     }
-    pub fn pop(mut self) -> Environment {
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -35,7 +36,7 @@ impl Environment {
 // Eval trait and use `dyn Eval` here?
 #[derive(Clone)]
 pub enum Implementation {
-    Host(Rc<dyn Fn(Expr) -> Expr>),
+    Host(Rc<dyn Fn(Environment, Expr) -> Expr>),
     Expr(Box<Expr>),
 }
 
@@ -59,9 +60,9 @@ impl std::fmt::Debug for Implementation {
 }
 
 impl Implementation {
-    pub fn evaluate(env: Environment, exp: Implementation, arg: Expr) -> Expr {
-        match exp {
-            Self::Host(exp) => (*exp)(arg),
+    pub fn evaluate(env: Environment, fun: Implementation, arg: Expr) -> Expr {
+        match fun {
+            Self::Host(exp) => (*exp)(env, arg),
             Self::Expr(exp) => Expr::evaluate(env.put(arg), *exp)
         }
     }
@@ -162,48 +163,31 @@ mod tests {
             // ((succ zero) 1) id = id (x -> f -> x) = x -> f -> x = zero
             let n_zero = Expr::app(n_one, id);
 
-            assert_eq!(Expr::evaluate(Environment::new(), n_zero), zero);
+            assert_eq!(Expr::evaluate(Environment::new(), n_zero), Expr::env(Environment::new(), zero));
+        }
+
+        fn host(f: impl Fn(Environment, Expr) -> Expr + 'static) -> Expr {
+            Expr::Fun(Implementation::Host(Rc::new(f)))
+        }
+
+        #[test]
+        fn arithmetic() {
+            let one = Expr::Int(1);
+            let two = Expr::Int(2);
+            let add = host(|env, exp| match exp {
+                Expr::Int(a) => {
+                    let f = host(move |_, exp| match exp {
+                        Expr::Int(b) => Expr::Int(a + b),
+                        exp => Expr::err(Error::MismatchedType, exp),
+                    });
+                    Expr::env(env, f)
+                }
+                exp => Expr::err(Error::MismatchedType, exp),
+            });
+            // ((+ 1) 2)
+            let exp = Expr::app(Expr::app(add, one), two);
+            let result = Expr::evaluate(Environment::new(), exp);
+            assert_eq!(result, Expr::Int(3));
         }
     }
-
-    // Test cases copied from Untyped Lambda Calculus.
-    // #[test]
-    // fn test_term_eval() {
-    //     let id = Expr::Fun(Func {
-    //         env: Environment::new(),
-    //         pat: "x".to_string(),
-    //         typ: Type::Int,
-    //         exp: FuncImpl::Expr(Box::new(Expr::Var("x".to_string()))),
-    //     });
-    //     let one = Expr::Int(1);
-    //     let app = Expr::App(Box::new(id), Box::new(one));
-    //     let result = Expr::eval(Environment::new(), app);
-    //     assert_eq!(result, Ok(Expr::Int(1)));
-    // }
-
-    // fn host(f: impl Fn(Expr) -> Result<Expr> + 'static, para_type: Type, body_type: Type) -> Expr {
-    //     Expr::Fun(Func {
-    //         env: Environment::new(),
-    //         pat: String::new(),
-    //         typ: para_type,
-    //         exp: FuncImpl::Host(Rc::new(f), body_type)
-    //     })
-    // }
-
-    // #[test]
-    // fn test_term_arithm() {
-    //     let one = Expr::Int(1);
-    //     let two = Expr::Int(2);
-    //     let plus = host(move |term| match term {
-    //         Expr::Int(a) => Ok(host(move |term| match term {
-    //             Expr::Int(b) => Ok(Expr::Int(a + b)),
-    //             _ => Err(Error::MismatchedType(Type::Int)),
-    //         }, Type::Int, Type::Int)),
-    //         _ => Err(Error::MismatchedType(Type::Int)),
-    //     }, Type::Int, Type::fun(Type::Int, Type::Int));
-    //     let ap_left = Expr::App(Box::new(plus), Box::new(one));
-    //     let ap_right = Expr::App(Box::new(ap_left), Box::new(two));
-    //     let result = Expr::eval(Environment::new(), ap_right);
-    //     assert_eq!(result, Ok(Expr::Int(3)));
-    // }
 }
