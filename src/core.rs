@@ -5,13 +5,12 @@ use std::vec::Vec;
 
 // We don't include detailed information here, since well-typed program should not throw these
 // errors during runtime.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
-    UndefinedVariable,
+    FreeVariable,
     MismatchedType,
+    DividedByZero,
 }
-
-type Result<T> = std::result::Result<T, Error>;
 
 // We can definitly do some optimization over the vector - for now it's copied every time it's changed.
 #[derive(Debug, Clone, PartialEq)]
@@ -21,24 +20,26 @@ impl Environment {
     pub fn new() -> Self {
         Self(Vec::new())
     }
-    pub fn find(&self, name: usize) -> Option<Expr> {
+    pub fn get(&self, name: usize) -> Option<Expr> {
         Some(self.0.get(self.0.len() - name - 1)?.clone())
     }
-    pub fn push(mut self, expr: Expr) -> Environment {
+    pub fn put(mut self, expr: Expr) -> Environment {
         self.0.push(expr);
         self
+    }
+    pub fn pop(mut self) -> Environment {
     }
 }
 
 // We're using function pointer (dynamic dispatch) here anyway, so maybe it's better to define a
 // Eval trait and use `dyn Eval` here?
 #[derive(Clone)]
-pub enum FuncImpl {
-    Host(Rc<dyn Fn(Expr) -> Result<Expr>>),
+pub enum Implementation {
+    Host(Rc<dyn Fn(Expr) -> Expr>),
     Expr(Box<Expr>),
 }
 
-impl PartialEq for FuncImpl {
+impl PartialEq for Implementation {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Host(self_rc), Self::Host(other_rc)) => Rc::ptr_eq(self_rc, other_rc),
@@ -48,7 +49,7 @@ impl PartialEq for FuncImpl {
     }
 }
 
-impl std::fmt::Debug for FuncImpl {
+impl std::fmt::Debug for Implementation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Host(_) => write!(f, "<built-in function>"),
@@ -57,67 +58,75 @@ impl std::fmt::Debug for FuncImpl {
     }
 }
 
-impl FuncImpl {
-    pub fn evaluate(env: Environment, exp: FuncImpl, arg: Expr) -> Result<Expr> {
+impl Implementation {
+    pub fn evaluate(env: Environment, exp: Implementation, arg: Expr) -> Expr {
         match exp {
             Self::Host(exp) => (*exp)(arg),
-            Self::Expr(exp) => Expr::evaluate(env.push(arg), *exp)
+            Self::Expr(exp) => Expr::evaluate(env.put(arg), *exp)
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Func {
-    pub env: Environment,
-    pub exp: FuncImpl,
-}
-
-impl Func {
-    pub fn evaluate(fun: Func, arg: Expr) -> Result<Expr> {
-        FuncImpl::evaluate(fun.env, fun.exp, arg)
-    }
-}
-
-// TODO: Use De Bruiji index.
-#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int(i64),
     Str(String),
     Var(usize),
-    Fun(Func),
+    Fun(Implementation),
+    Env(Environment, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
+    Err(Error, Box<Expr>)
 }
 
 impl Expr {
-    pub fn int(int: i64) -> Self { Self::Int(int) }
-    pub fn str(str: &str) -> Self { Self::Str(str.to_string()) }
-    pub fn var(var: usize) -> Self { Self::Var(var) }
+    pub fn int(int: i64) -> Self {
+        Self::Int(int)
+    }
+    pub fn str(str: &str) -> Self {
+        Self::Str(str.to_string())
+    }
+    pub fn var(var: usize) -> Self {
+        Self::Var(var)
+    }
     pub fn fun(exp: Self) -> Self {
-        Self::Fun(Func {
-            env: Environment::new(),
-            exp: FuncImpl::Expr(Box::new(exp)),
-        })
+        Self::Fun(Implementation::Expr(Box::new(exp)))
     }
     pub fn app(fun: Self, arg: Self) -> Self {
         Self::App(Box::new(fun), Box::new(arg))
     }
+    pub fn env(env: Environment, exp: Self) -> Self {
+        Self::Env(env, Box::new(exp))
+    }
+    pub fn err(err: Error, exp: Self) -> Self {
+        Self::Err(err, Box::new(exp))
+    }
 }
 
 impl Expr {
-    pub fn evaluate(env: Environment, exp: Expr) -> Result<Expr> {
+    // Evaluates an expression. It shall annotate errornous nodes.
+    pub fn evaluate(env: Environment, exp: Expr) -> Expr {
         match exp {
-            Self::Int(int) => Ok(Self::Int(int)),
-            Self::Str(str) => Ok(Self::Str(str)),
-            Self::Var(var) => match env.find(var) {
-                Some(exp) => Ok(exp.clone()),
-                None => Err(Error::UndefinedVariable),
+            Self::Int(int) => Self::Int(int),
+            Self::Str(str) => Self::Str(str),
+            Self::Var(var) => match env.get(var) {
+                Some(exp) => exp,
+                None => Self::err(Error::FreeVariable, Self::Var(var))
             },
-            Self::Fun(fun) => Ok(Self::Fun(Func { env, exp: fun.exp, ..fun })),
-            Self::App(fun, arg) => match Self::evaluate(env.clone(), *fun)? {
-                // TODO: We copied `env` here, could we save it?
-                Self::Fun(fun) => Func::evaluate(fun, Self::evaluate(env, *arg)?),
-                _ => Err(Error::MismatchedType)
+            Self::Fun(fun) => Self::env(env, Self::Fun(fun)),
+            Self::App(fun, arg) => {
+                let fun = Self::evaluate(env.clone(), *fun);
+                let arg = Self::evaluate(env, *arg);
+                match fun {
+                    // TODO: We copied `env` here, could we save it?
+                    Self::Env(env, exp) => match *exp {
+                        Self::Fun(fun) => Implementation::evaluate(env, fun, arg),
+                        exp => Self::err(Error::MismatchedType, exp)
+                    }
+                    exp => Self::err(Error::MismatchedType, exp)
+                }
             }
+            Self::Env(env, exp) => Self::evaluate(env, *exp),
+            Self::Err(err, exp) => Self::Err(err, exp)
         }
     }
 }
@@ -135,7 +144,7 @@ mod tests {
             let one = Expr::int(1);
             let app = Expr::app(id, one);
             let result = Expr::evaluate(Environment::new(), app);
-            assert_eq!(result, Ok(Expr::int(1)));
+            assert_eq!(result, Expr::int(1));
         }
 
         #[test]
@@ -153,7 +162,7 @@ mod tests {
             // ((succ zero) 1) id = id (x -> f -> x) = x -> f -> x = zero
             let n_zero = Expr::app(n_one, id);
 
-            assert_eq!(Expr::evaluate(Environment::new(), n_zero), Ok(zero));
+            assert_eq!(Expr::evaluate(Environment::new(), n_zero), zero);
         }
     }
 
